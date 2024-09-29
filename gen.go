@@ -9,14 +9,15 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"github.com/maxmind/mmdbwriter"
-	"github.com/maxmind/mmdbwriter/mmdbtype"
-	"go4.org/netipx"
 	"io"
-	"log"
 	"net/http"
 	"net/netip"
 	"os"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/maxmind/mmdbwriter"
+	"github.com/maxmind/mmdbwriter/mmdbtype"
+	"go4.org/netipx"
 )
 
 func insert(tree *mmdbwriter.Tree, url string) error {
@@ -62,33 +63,46 @@ func insert(tree *mmdbwriter.Tree, url string) error {
 }
 
 func main() {
-	tree, err := mmdbwriter.New(
+	tree := check2(mmdbwriter.New(
 		mmdbwriter.Options{
 			DatabaseType:            "ip2country",
 			RecordSize:              24,
 			IncludeReservedNetworks: true,
 		},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
+	))
 
 	urls := []string{
 		"https://github.com/sapics/ip-location-db/raw/main/geolite2-country/geolite2-country-ipv4.csv",
 		"https://github.com/sapics/ip-location-db/raw/main/geolite2-country/geolite2-country-ipv6.csv",
 	}
 	for _, url := range urls {
-		if err := insert(tree, url); err != nil {
-			log.Fatalln(err)
-		}
+		check(insert(tree, url))
 	}
 
-	mmdb, err := os.Create("geolite2-country.mmdb")
+	f := check2(os.Create("geolite2-country.mmdb.zst"))
+	defer checkClose(f)
+
+	w := check2(zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBestCompression)))
+	defer checkClose(w)
+
+	check2(tree.WriteTo(w))
+}
+
+func check(err error) {
 	if err != nil {
-		log.Fatalln(err)
+		panic(err)
 	}
+}
 
-	if _, err = tree.WriteTo(mmdb); err != nil {
-		log.Fatalln(err)
+func checkClose(c io.Closer) {
+	if err := c.Close(); err != nil {
+		panic(err)
 	}
+}
+
+func check2[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
